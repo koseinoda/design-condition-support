@@ -1,6 +1,51 @@
 import os
+import io
+
 import fitz
+import pytesseract
+from PIL import Image
+
 from config import CATEGORY_RULES, CATEGORY_ORDER
+
+
+TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+
+
+def get_text_with_ocr(page):
+    """
+    文字が取れない画像PDFページをOCRで文字化する
+    """
+
+    try:
+        mat = fitz.Matrix(2, 2)
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+
+        text = pytesseract.image_to_string(
+            img,
+            lang="jpn+eng"
+        )
+
+        return text
+
+    except Exception as e:
+        print(f"OCR失敗：{e}")
+        return ""
+
+
+def get_page_text(page):
+    """
+    通常の文字抽出を優先し、文字が少ない場合はOCRに切り替える
+    """
+
+    text = page.get_text()
+
+    if len(text.strip()) >= 30:
+        return text, "text"
+
+    ocr_text = get_text_with_ocr(page)
+    return ocr_text, "ocr"
 
 
 def make_short_summary(category, hit_keywords):
@@ -50,21 +95,43 @@ def extract_pdf_data(pdf_path):
     records = []
     source_file = os.path.basename(pdf_path)
 
-    doc = fitz.open(pdf_path)
+    print(f"\n===== 抽出開始：{source_file} =====")
 
-    for page_num in range(len(doc)):
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        print(f"PDFを開けませんでした：{e}")
+        return records
+
+    total_pages = len(doc)
+    print(f"総ページ数：{total_pages}")
+
+    for page_num in range(total_pages):
         page = doc[page_num]
-        text = page.get_text()
+        page_no = page_num + 1
+
+        text, method = get_page_text(page)
+        text_length = len(text.strip())
+
+        print(f"{page_no}ページ：文字数 {text_length} / 方法：{method}")
 
         if not text.strip():
             continue
 
         if page_num <= 2 and "目次" in text:
+            print(f"{page_no}ページ：目次のためスキップ")
             continue
 
         for category_index, category in enumerate(CATEGORY_ORDER, start=1):
             keywords = CATEGORY_RULES[category]
-            hit_keywords = [kw for kw in keywords if kw in text]
+
+            hit_keywords = [
+                kw for kw in keywords
+                if kw in text
+            ]
+
+            if hit_keywords:
+                print(f"  ヒット：{category} / {page_no}ページ / {hit_keywords}")
 
             if not hit_keywords:
                 continue
@@ -74,7 +141,7 @@ def extract_pdf_data(pdf_path):
                 "source_file": source_file,
                 "source_path": pdf_path,
                 "category": category,
-                "page_no": page_num + 1,
+                "page_no": page_no,
                 "page_num": page_num,
                 "keywords": ", ".join(hit_keywords),
                 "summary": make_short_summary(category, hit_keywords),
@@ -83,4 +150,8 @@ def extract_pdf_data(pdf_path):
             })
 
     doc.close()
+
+    print(f"抽出完了：{source_file} / {len(records)}件抽出")
+    print("====================================\n")
+
     return records

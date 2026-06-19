@@ -3,6 +3,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 from config import CATEGORY_ORDER, CATEGORY_COLORS
 
@@ -96,6 +97,46 @@ def color_by_category(ws, category_col):
             ws.cell(row=row_num, column=col).fill = fill
 
 
+def create_comparison_sheet(wb, records):
+    ws = wb.create_sheet("複数仕様書比較")
+
+    source_files = sorted(set(record["source_file"] for record in records))
+
+    headers = ["条件書項目"] + source_files
+    write_headers(ws, headers)
+
+    row = 2
+
+    for category in CATEGORY_ORDER:
+        ws.cell(row=row, column=1, value=category)
+
+        for col, source_file in enumerate(source_files, start=2):
+            pages = sorted({
+                record["page_no"]
+                for record in records
+                if record["category"] == category
+                and record["source_file"] == source_file
+            })
+
+            if pages:
+                page_text = ", ".join([f"{p}P" for p in pages])
+            else:
+                page_text = "-"
+
+            ws.cell(row=row, column=col, value=page_text)
+
+        row += 1
+
+    apply_style(ws)
+
+    ws.column_dimensions["A"].width = 32
+
+    for col in range(2, ws.max_column + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 26
+
+    color_by_category(ws, 1)
+
+
 def create_excel(records, output_excel):
     wb = Workbook()
 
@@ -103,7 +144,7 @@ def create_excel(records, output_excel):
     link_dir = output_path.parent / "pdf_links"
 
     # =========================
-    # 全体一覧シート
+    # 該当ページ一覧
     # =========================
 
     ws = wb.active
@@ -151,6 +192,12 @@ def create_excel(records, output_excel):
     ws.column_dimensions["F"].width = 6
     ws.column_dimensions["G"].width = 12
     ws.column_dimensions["H"].width = 10
+
+    # =========================
+    # 複数仕様書比較シート
+    # =========================
+
+    create_comparison_sheet(wb, records)
 
     # =========================
     # 項目別シート
@@ -203,5 +250,25 @@ def create_excel(records, output_excel):
         ws_cat.column_dimensions["E"].width = 6
         ws_cat.column_dimensions["F"].width = 12
         ws_cat.column_dimensions["G"].width = 10
+
+    # =========================
+    # シート順整理
+    # =========================
+
+    ordered_sheet_names = [
+        "該当ページ一覧",
+        "複数仕様書比較"
+    ]
+
+    for category in CATEGORY_ORDER:
+        ordered_sheet_names.append(
+            category.replace(".", "_").replace(" ", "")[:25]
+        )
+
+    wb._sheets = [
+        wb[name]
+        for name in ordered_sheet_names
+        if name in wb.sheetnames
+    ]
 
     wb.save(output_excel)

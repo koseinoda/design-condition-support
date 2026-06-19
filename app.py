@@ -46,7 +46,6 @@ def remove_duplicates(records):
 def show_pdf_page_as_image(pdf_path, page_no):
     try:
         doc = fitz.open(pdf_path)
-
         page_index = page_no - 1
 
         if page_index < 0 or page_index >= len(doc):
@@ -55,15 +54,11 @@ def show_pdf_page_as_image(pdf_path, page_no):
             return
 
         page = doc[page_index]
-
-        zoom = 2
-        mat = fitz.Matrix(zoom, zoom)
+        mat = fitz.Matrix(2, 2)
         pix = page.get_pixmap(matrix=mat)
-
         img = Image.open(io.BytesIO(pix.tobytes("png")))
 
         st.image(img, use_container_width=True)
-
         doc.close()
 
     except Exception as e:
@@ -81,13 +76,11 @@ if uploaded_files:
 
     if st.button("解析開始"):
 
-        # 前回の解析結果・PDF表示情報をリセット
         st.session_state.pop("selected_pdf", None)
         st.session_state.pop("selected_page", None)
         st.session_state.pop("records", None)
         st.session_state.pop("pdf_paths", None)
 
-        # PDFsフォルダを初期化
         for file in os.listdir(PDF_FOLDER):
             file_path = os.path.join(PDF_FOLDER, file)
             if os.path.isfile(file_path):
@@ -96,7 +89,6 @@ if uploaded_files:
         saved_pdf_paths = []
         skipped_files = []
 
-        # PDF保存＋仕様書らしさ判定
         for uploaded_file in uploaded_files:
             save_path = os.path.join(PDF_FOLDER, uploaded_file.name)
 
@@ -107,19 +99,17 @@ if uploaded_files:
 
             if check_result["is_spec"]:
                 st.info(
-                    f"{uploaded_file.name}：{check_result['message']}（一致数：{check_result['hit_count']}）"
+                    f"{uploaded_file.name}: {check_result['message']}（一致数：{check_result['hit_count']}）"
                 )
                 saved_pdf_paths.append(save_path)
             else:
                 st.warning(
-                    f"{uploaded_file.name}：{check_result['message']}（一致数：{check_result['hit_count']}）"
+                    f"{uploaded_file.name}: {check_result['message']}（一致数：{check_result['hit_count']}）"
                 )
                 skipped_files.append(uploaded_file.name)
 
         if skipped_files:
-            st.warning(
-                "以下のPDFは仕様書ではない可能性があるため、解析対象から除外しました。"
-            )
+            st.warning("以下のPDFは仕様書ではない可能性があるため、解析対象から除外しました。")
             for skipped in skipped_files:
                 st.write(f"- {skipped}")
 
@@ -161,6 +151,26 @@ if "records" in st.session_state and "pdf_paths" in st.session_state:
     records = st.session_state["records"]
     pdf_paths = st.session_state["pdf_paths"]
 
+    source_files = sorted(set(record["source_file"] for record in records))
+
+    st.subheader("表示設定")
+
+    selected_source = st.selectbox(
+        "表示する仕様書を選択",
+        options=["すべて"] + source_files,
+        index=0
+    )
+
+    if selected_source == "すべて":
+        display_records = records
+    else:
+        display_records = [
+            record for record in records
+            if record["source_file"] == selected_source
+        ]
+
+    st.caption(f"表示中：{selected_source} / {len(display_records)}件")
+
     left, right = st.columns([1, 1.4])
 
     with left:
@@ -168,29 +178,45 @@ if "records" in st.session_state and "pdf_paths" in st.session_state:
 
         for category in CATEGORY_ORDER:
             category_records = [
-                r for r in records
+                r for r in display_records
                 if r["category"] == category
             ]
 
             if not category_records:
                 continue
 
-            with st.expander(category, expanded=False):
-                for record in category_records:
-                    page_no = record["page_no"]
-                    table_mark = record["has_table"]
-                    summary = record.get("summary", "")
+            with st.expander(f"{category}（{len(category_records)}件）", expanded=False):
 
+                page_options = {
+                    f"{record['source_file']}：{record['page_no']}ページ｜表：{record['has_table']}｜{record.get('summary', '')}": record
+                    for record in category_records
+                }
+
+                selected_label = st.selectbox(
+                    "確認したいページを選択",
+                    options=list(page_options.keys()),
+                    key=f"select_{selected_source}_{category}"
+                )
+
+                selected_record = page_options[selected_label]
+
+                if st.button(
+                    "選択したページを表示",
+                    key=f"show_{selected_source}_{category}"
+                ):
+                    st.session_state["selected_pdf"] = selected_record["source_file"]
+                    st.session_state["selected_page"] = selected_record["page_no"]
+
+                st.caption("候補ページ一覧")
+                for record in category_records[:5]:
                     st.write(
-                        f"**{page_no}ページ**｜表：{table_mark}｜{summary}"
+                        f"- {record['source_file']}｜{record['page_no']}ページ｜表：{record['has_table']}｜{record.get('summary', '')}"
                     )
 
-                    if st.button(
-                        f"{record['source_file']}：{page_no}ページを表示",
-                        key=f"{record['source_file']}_{category}_{page_no}"
-                    ):
-                        st.session_state["selected_pdf"] = record["source_file"]
-                        st.session_state["selected_page"] = page_no
+                if len(category_records) > 5:
+                    st.caption(
+                        f"他 {len(category_records) - 5} 件は上の選択欄から確認できます。"
+                    )
 
         st.divider()
 
