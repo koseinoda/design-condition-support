@@ -44,26 +44,30 @@ def remove_duplicates(records):
 
 
 def show_pdf_page_as_image(pdf_path, page_no):
-    doc = fitz.open(pdf_path)
+    try:
+        doc = fitz.open(pdf_path)
 
-    page_index = page_no - 1
+        page_index = page_no - 1
 
-    if page_index < 0 or page_index >= len(doc):
-        st.error("指定ページが見つかりません。")
+        if page_index < 0 or page_index >= len(doc):
+            st.error("指定ページが見つかりません。")
+            doc.close()
+            return
+
+        page = doc[page_index]
+
+        zoom = 2
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+
+        st.image(img, use_container_width=True)
+
         doc.close()
-        return
 
-    page = doc[page_index]
-
-    zoom = 2
-    mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat)
-
-    img = Image.open(io.BytesIO(pix.tobytes("png")))
-
-    st.image(img, use_container_width=True)
-
-    doc.close()
+    except Exception as e:
+        st.error(f"PDF表示中にエラーが発生しました：{e}")
 
 
 uploaded_files = st.file_uploader(
@@ -76,6 +80,12 @@ if uploaded_files:
     st.success(f"{len(uploaded_files)}件のPDFが選択されました。")
 
     if st.button("解析開始"):
+
+        # 前回の解析結果・PDF表示情報をリセット
+        st.session_state.pop("selected_pdf", None)
+        st.session_state.pop("selected_page", None)
+        st.session_state.pop("records", None)
+        st.session_state.pop("pdf_paths", None)
 
         # PDFsフォルダを初期化
         for file in os.listdir(PDF_FOLDER):
@@ -146,7 +156,7 @@ if uploaded_files:
         st.success("解析が完了しました。")
 
 
-if "records" in st.session_state:
+if "records" in st.session_state and "pdf_paths" in st.session_state:
 
     records = st.session_state["records"]
     pdf_paths = st.session_state["pdf_paths"]
@@ -184,18 +194,23 @@ if "records" in st.session_state:
 
         st.divider()
 
-        with open(OUTPUT_EXCEL, "rb") as f:
-            st.download_button(
-                label="Excelをダウンロード",
-                data=f,
-                file_name="設計条件書_該当ページ一覧.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        if os.path.exists(OUTPUT_EXCEL):
+            with open(OUTPUT_EXCEL, "rb") as f:
+                st.download_button(
+                    label="Excelをダウンロード",
+                    data=f,
+                    file_name="設計条件書_該当ページ一覧.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
     with right:
         st.subheader("PDF表示")
 
-        if "selected_pdf" in st.session_state:
+        if (
+            "selected_pdf" in st.session_state
+            and "selected_page" in st.session_state
+            and st.session_state["selected_pdf"] in pdf_paths
+        ):
             selected_pdf = st.session_state["selected_pdf"]
             selected_page = st.session_state["selected_page"]
             pdf_path = pdf_paths[selected_pdf]
